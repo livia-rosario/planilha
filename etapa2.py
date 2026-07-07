@@ -100,6 +100,11 @@ def _aplicar_cores(caminho_arquivo: str, col_acao_nome: str):
     wb.close()
 
 
+def _data_corte_mes_atual() -> datetime:
+    data_atual = datetime.now()
+    return datetime(data_atual.year, data_atual.month, 1)
+
+
 # =========================================================================
 # ETAPA 2 - CLASSIFICAÇÃO DE CONTAS
 # =========================================================================
@@ -180,7 +185,10 @@ def processar_etapa2_core(path_contas: str, path_transferencias: str) -> str:
         .last()
     )
 
-    df[COL_DATA_TRANSF] = df[COL_ID].map(mapa_transf)
+    if mapa_transf.empty:
+        df[COL_DATA_TRANSF] = pd.NaT
+    else:
+        df[COL_DATA_TRANSF] = df[COL_ID].map(mapa_transf)
     df[COL_TRANSFERIDO] = df[COL_DATA_TRANSF].notna().map({True: 'Sim', False: 'Não'})
 
     # ================= MÁSCARAS BASE =================
@@ -189,7 +197,8 @@ def processar_etapa2_core(path_contas: str, path_transferencias: str) -> str:
     mask_outros = df[COL_CATEGORIA].isin(OUTROS)
     mask_avaliar = ~mask_excecao
 
-    hoje = datetime.now()
+    data_corte = _data_corte_mes_atual()
+    data_corte_formatada = data_corte.strftime('%d/%m/%Y')
 
     # ================= CONDIÇÕES =================
     cond_iga = mask_avaliar & (df[COL_STATUS] == 'INACTIVE')
@@ -217,7 +226,7 @@ def processar_etapa2_core(path_contas: str, path_transferencias: str) -> str:
     )
 
     data_base = df[COL_LOGON].combine_first(df[COL_CRIACAO])
-    dias = (hoje - data_base).dt.days
+    dias = (data_corte - data_base).dt.days
 
     cond_dxc_tempo = mask_avaliar & mask_dxc & data_base.notna() & (dias > 180)
     cond_outros_tempo = mask_avaliar & mask_outros & data_base.notna() & (dias > 90)
@@ -318,6 +327,7 @@ def processar_etapa2_core(path_contas: str, path_transferencias: str) -> str:
         f'✅ PLANILHA GERADA COM SUCESSO!\n\n'
         f'📄 Planilha gerada: {ARQ_SAIDA}\n'
         f'📁 Local: {caminho}\n\n'
+        f'📅 Data de corte utilizada: {data_corte_formatada}\n\n'
         f'Resumo das Ações:\n{resumo.to_string()}\n\n'
         f'⚠️ Linhas com observação adicional: {qtd_sinalizadas}'
     )
@@ -533,8 +543,13 @@ class App(ctk.CTk):
 
         subtitle = ctk.CTkLabel(
             parent,
-            text="Escolha os arquivos .xlsx de Contas e Transferências.",
-            font=ctk.CTkFont(size=13)
+            text=(
+                "Escolha os arquivos .xlsx de Contas e Transferências. "
+                "Os dias sem logon são calculados a partir do primeiro dia do mês atual."
+            ),
+            font=ctk.CTkFont(size=13),
+            wraplength=720,
+            justify="left"
         )
         subtitle.pack(anchor="w", padx=6, pady=(0, 14))
 
@@ -687,14 +702,16 @@ class App(ctk.CTk):
         )
         status_label.pack(anchor="w", padx=14, pady=(12, 6))
 
-        box = ctk.CTkTextbox(status_frame, corner_radius=10)
+        box = ctk.CTkTextbox(status_frame, corner_radius=10, wrap="word")
         box.pack(fill="both", expand=True, padx=14, pady=(0, 14))
 
         return box
 
     def _set_status(self, box, text):
+        box.configure(state="normal")
         box.delete("1.0", "end")
         box.insert("1.0", text)
+        box.configure(state="disabled")
 
     def _pick_file(self, var, label):
         path = filedialog.askopenfilename(
